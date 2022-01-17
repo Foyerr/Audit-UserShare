@@ -75,10 +75,10 @@ param (
     [switch]$folderSize,
 
     [ValidateScript({Test-Path $_})]
-    [String] $searchDir="",
+    [String] $searchDir=$null,
 
     [ValidateScript({Test-Path $_})]
-    [String]$saveFolder="",
+    [String]$saveFolder=$null,
 
     [ValidateSet(“Move”,”Remove”)]
     [String] $DeleteNoAccounts,
@@ -99,119 +99,123 @@ param (
 
 Import-Module ActiveDirectory
 
-$searchDir=$(get-aduser $env:username -Properties HomeDirectory).HomeDirectory -replace "$env:username"
-$totalSize=0
-$oldUser = @()
-$Exclude += @("System.mdw","%USERNAME%")
-$loopCount=0
-
 #Removes or Moves user folder 
 #Param $user: The custom object made in the main function
 #Param $action: Derived from $DeleteNoUser or $deleteOldUser this specfies to remove or move
-function Remove-Folder($user,$action){
+function Remove-Folder($oldUser){
 
     #Invoke-Command -ComputerName "ServerName" -scriptblock {Get-SmbOpenFile|Where-Object Path -like "PathToUserFolder"|Close-SmbOpenFile -Force}
     #move-Item "ServerPath" -Recurse -Force $searchDir\$i
     #Write-Warning -Message "You are able to (re)move folders, are you sure?" -WarningAction Inquire
+    foreach($user in $oldUser){
 
-    if($logPath -ne ''){
-        Write-Output "$action : $($user.SamAccountName)" | Out-File $logPath\"UserShareAudit.log" -Append
-    }
+        if($DeleteNoAccounts){
+            if(!($user."No Account")){Continue}
+            else{$action=$DeleteNoAccounts} 
+        }
+        elseif($DeleteOldAccounts){
+            if(($user."No Account")){Continue}
+            else{$action=$DeleteOldAccounts} 
+        }
 
-    if($action.ToLower() -eq "move"){
-        Move-Item -Force $searchDir\$user.SamAccountName $MovePath -Confirm
-    
-    }elseif($action.ToLower() -eq "remove"){
-        Remove-Item -Recurse -Force $searchDir\$user.SamAccountName -Confirm
+        if($logPath){logToPath $logPath "$action : $($user.SamAccountName)"}
+
+        if($action.ToLower() -eq "move"){
+
+            #Verify MovePath is specfied when moving folders and follow through if correct
+            if($MovePath -eq ''){
+                Write-Error -Message "Specify -MovePath" -Category InvalidArgument
+                Exit 1
+            }
+            Move-Item -Force $searchDir\$user.SamAccountName $MovePath -Confirm
+
+        }elseif($action.ToLower() -eq "remove"){
+            Remove-Item -Recurse -Force $searchDir\$user.SamAccountName -Confirm
+        }
     }
 }
 
 #Calculate the folder size of each users home folder
 #Param: $user: The custom object made in the main function
-function Get-FolderSize($user){
+function Get-FolderSize($oldUser){
+    $totalSize=0
+    $loopCount=0
+    $totalCount=$oldUser.count
+    $rtnValue = @()
+    
+    foreach($user in $oldUser){
+        Write-Progress -Activity "Calculating size of : $($user.SamAccountName)" -PercentComplete $(($loopCount/$totalCount)*100)
+        if($logPath){logToPath $logPath "Calculating size : $($user.SamAccountName)"}
 
-    if($logPath -ne ''){
-        Write-Output "Calculating size : $($user.SamAccountName)" | Out-File $logPath\"UserShareAudit.log" -Append
+        $log=''
+        $log=robocopy "$searchDir\$($user.SamAccountName)" NULL /L /S /NJH /BYTES /NC /NDL /XJ /R:0 /W:0 /MT:32 /NFL
+        $Line = $log | Where-Object{$_ -match "^\s+Bytes.+"}
+        $Line = $Line -split "\s+"
+    
+        $rtnValue+=$($user | select-object -property *,@{n="Size/GB";e={$([math]::Round($Line[3]/1GB,2))}})
+        $totalSize+=$([math]::Round($Line[3]/1GB,2))
+        $loopCount++
     }
 
-    $log=''
-    $log=robocopy "$searchDir\$($user.SamAccountName)" NULL /L /S /NJH /BYTES /NC /NDL /XJ /R:0 /W:0 /MT:32 /NFL
-    $Line = $log | Where-Object{$_ -match "^\s+Bytes.+"}
-    $Line = $Line -split "\s+"
-    
-    $rtnValue = $($user | select-object -property *,@{n="Size/GB";e={$([math]::Round($Line[3]/1GB,2))}})
+    $rtnValue+=""
+    $rtnValue+=$(""|select-object -property @{n="SamAccountName";e={"Total Size"}},@{n="Size/GB";e={$totalSize}})
     return $rtnValue
 }
 
+function Get-OldUsers(){
 
-
-$userShareList=$(get-childitem $searchDir)
-$totalCount=$userShareList.count
-
-#Loop through the list of users in the share and test for AD accounts if older than x days
-#If -folderSize calculate the size of each users folder
-foreach($i in $userShareList){
-    Write-Progress -Activity "Searching: $searchDir$i" -PercentComplete $(($loopCount/$totalCount)*100)
-        
-    #Test for if folder and not excluded
-    if($i.PSIsContainer -and $i.Name -notin $Exclude ){
-
-        try{
-            $user=$(Get-ADUser -Identity $i.Name -Properties "LastLogonDate" | Where-Object {($_.LastLogonDate -lt (Get-Date).AddDays(-$daysSinceLogin)) -and ($_.LastLogonDate -ne $NULL)})
-            $user = $($user |select-object SamAccountName,Enabled,@{n="No Account";e={$false}},LastLogonDate)
-
-        }catch [Microsoft.ActiveDirectory.Management.ADIdentityNotFoundException]{
-            $user = $(""|select-object @{n="SamAccountName";e={$i.Name}},@{n="Enabled";e={"N/A"}},@{n="No Account";e={$true}})
-        }
-
-        if($logPath -ne '' -and $user){
-           Write-Output "User Found : $($user.SamAccountName)" | Out-File $logPath\"UserShareAudit.log" -Append 
-        }
-
-        if($folderSize -and $user){$user= Get-FolderSize $user; $totalSize+=$user."Size/GB"}
-
-        $olduser+=$user
-        $loopCount++
+    $loopCount=0
+    $oldUser = @()
+    if(!$searchDir){
+        $searchDir=($(get-aduser $env:username -Properties HomeDirectory).HomeDirectory -replace "$env:username")
     }
+    
+    $userShareList=$(get-childitem $searchDir)
+    $totalCount=$userShareList.count
+    #Loop through the list of users in the share and test for AD accounts if older than x days
+    #If -folderSize calculate the size of each users folder
+
+    foreach($i in $userShareList){
+        Write-Progress -Activity "Searching : $searchDir$i" -PercentComplete $(($loopCount/$totalCount)*100)
+        
+        #Test for if folder and not excluded
+        if($i.PSIsContainer -and $i.Name -notin $Exclude ){
+
+            try{
+                $user=$(Get-ADUser -Identity $i.Name -Properties "LastLogonDate" | Where-Object {($_.LastLogonDate -lt (Get-Date).AddDays(-$daysSinceLogin)) -and ($_.LastLogonDate -ne $NULL)})
+                $user = $($user |select-object SamAccountName,Enabled,@{n="No Account";e={$false}},LastLogonDate)
+
+            }catch [Microsoft.ActiveDirectory.Management.ADIdentityNotFoundException]{
+                $user = $(""|select-object @{n="SamAccountName";e={$i.Name}},@{n="Enabled";e={"N/A"}},@{n="No Account";e={$true}})
+            }
+
+            if($logPath -and $user){logToPath $logPath "User Found : $($user.SamAccountName)"}
+
+            $olduser+=$user
+            $loopCount++
+        }
+    }
+    return($oldUser)
+
 }
 
-if($saveFolder -notlike ""){
+function logToPath($logPath,$message){
+        $date=$(get-date -format "dd.MM.yyyy-HHmmss")
+        Write-Output "$date : $message" | Out-File $logPath\"UserShareAudit.log" -Append
+}
 
-    if($logPath -ne ''){
-        Write-Output "Saving Output" | Out-File $logPath\"UserShareAudit.log" -Append
-    }
+$oldUser=Get-OldUsers 
+if($folderSize){$oldUser=Get-FolderSize $oldUser}
+if($DeleteNoAccounts -or $DeleteOldAccounts){Remove-Folder $oldUser}
 
-    if(!(test-path $saveFolder)){
-        mkdir $saveFolder
-    }
+if($saveFolder){
+    if($logPath){logToPath $logPath "Saving Output"}
+
     $date=$(get-date -format "dd.MM.yyyy-HHmmss")
-    if($folderSize){
-        $olduser+=$(""|select-object -property @{n="SamAccountName";e={"Total Size"}},@{n="Size/GB";e={$totalSize}})
-    }
     $oldUser | export-csv -NoTypeInformation "$saveFolder\UserShareAudit - $date.csv"
-    
+
 }else{
-    $oldUser | Format-Table | Out-String | Write-Host
-    if($folderSize){
-        Write-Host("Total Size: $totalSize GB") -ForegroundColor Green
-    }
-        
+    $oldUser | Format-Table | Out-String | Write-Host        
 }
 
-#Verify MovePath is specfied when moving folders and follow through if correct
-if($($DeleteNoAccounts.ToLower()) -like "move" -or $($DeleteOldAccounts.ToLower()) -like "move" -and $MovePath -eq ''){
-    Write-Host "Specify -MovePath" -ForegroundColor Red
-    Exit 1
-}
-if($DeleteNoAccounts -or $DeleteOldAccounts){
-    foreach($user in $oldUser){
-        if($DeleteNoAccounts -and $user."No Account" -eq $true){
-            Remove-Folder $user $DeleteNoAccounts
-        }
-        if($DeleteOldAccounts -and $($user."No Account") -eq $false){
-            Remove-Folder $user $DeleteOldAccounts
-        }
 
-    }
-    
-}
