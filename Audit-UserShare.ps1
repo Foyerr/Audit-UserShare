@@ -84,6 +84,9 @@ param (
     [String] $DeleteNoAccounts,
 
     [ValidateSet(“Move”,”Remove”)]
+    [String] $DeleteDisabledUser,
+
+    [ValidateSet(“Move”,”Remove”)]
     [String] $DeleteOldAccounts,
 
     [ValidateScript({Test-Path $_})]
@@ -112,10 +115,12 @@ function Remove-Folder($oldUser){
         if($DeleteNoAccounts){
             if(!($user."No Account")){Continue}
             else{$action=$DeleteNoAccounts} 
-        }
-        elseif($DeleteOldAccounts){
+        }elseif($DeleteOldAccounts){
             if(($user."No Account")){Continue}
             else{$action=$DeleteOldAccounts} 
+        }elseif($DeleteDisabledUser){
+            if(($user.Enabled)){Continue}
+            else{$action=$DeleteDisabledUser} 
         }
 
         if($logPath){logToPath $logPath "$action : $($user.SamAccountName)"}
@@ -127,10 +132,11 @@ function Remove-Folder($oldUser){
                 Write-Error -Message "Specify -MovePath" -Category InvalidArgument
                 Exit 1
             }
-            Move-Item -Force $searchDir\$user.SamAccountName $MovePath -Confirm
+            Move-Item -Force $("$searchDir\$($user.SamAccountName)") $MovePath -Confirm
+            #Write-Host("Moving $user.SamAccountName")
 
         }elseif($action.ToLower() -eq "remove"){
-            Remove-Item -Recurse -Force $searchDir\$user.SamAccountName -Confirm
+            #Remove-Item -Recurse -Force $searchDir\$user.SamAccountName -Confirm
         }
     }
 }
@@ -166,9 +172,6 @@ function Get-OldUsers(){
 
     $loopCount=0
     $oldUser = @()
-    if(!$searchDir){
-        $searchDir=($(get-aduser $env:username -Properties HomeDirectory).HomeDirectory -replace "$env:username")
-    }
     
     $userShareList=$(get-childitem $searchDir)
     $totalCount=$userShareList.count
@@ -204,9 +207,15 @@ function logToPath($logPath,$message){
         Write-Output "$date : $message" | Out-File $logPath\"UserShareAudit.log" -Append
 }
 
-$oldUser=Get-OldUsers 
+if(!$searchDir){
+    $searchDir=($(get-aduser $env:username -Properties HomeDirectory).HomeDirectory -replace "$env:username")
+}
+
+$oldUser=Get-OldUsers
+ 
 if($folderSize){$oldUser=Get-FolderSize $oldUser}
-if($DeleteNoAccounts -or $DeleteOldAccounts){Remove-Folder $oldUser}
+
+if($DeleteNoAccounts -or $DeleteOldAccounts -or $DeleteDisabledUser){Remove-Folder $oldUser}
 
 if($saveFolder){
     if($logPath){logToPath $logPath "Saving Output"}
