@@ -1,6 +1,7 @@
 # Audit-UserShare
 
-Audit your users home directory.
+Audit your users home directory by finding folders that are no longer needed. 
+
 
 ## Purpose
     Quickly review your users roaming home directory and provide output to make decisions on the accounts and folders.
