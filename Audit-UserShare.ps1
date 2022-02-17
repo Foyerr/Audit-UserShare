@@ -2,16 +2,16 @@
 .SYNOPSIS
     Audit your user share to identify potentially unneeded folders.
 
-.PARAMETER DeleteNoAccounts
-    Removes the user folders found with no Active Directory accounts accosiated to them.
-    [OPTIONS] Move, Remove
+.PARAMETER Remove
+    Request to remove a group of users folders.
+    [OPTIONS] “NoAccount”,”DisabledUser”,"Old"
 
-.PARAMETER DeleteOldAccounts
-    Removes the user folders who have not logged in within the time specifed with the -daysSinceLogin parameter.
-    [OPTIONS] Move, Remove
+.PARAMETER Move
+    Request to move a group of users to another folder.
+    [OPTIONS] “NoAccount”,”DisabledUser”,"Old"
 
 .PARAMETER MovePath
-    The value used when the Move option is specfied at the Delete parameters.
+    The value used when the Move option is specfied to provide the path to move the folder to.
 
 .PARAMETER daysSinceLogin 
     Looks for the users in the user share who haven't logged in the the past X days. 
@@ -58,7 +58,7 @@
         testUser7         True      False 11-05-2021 8:34:55 AM     1.03
         testUser9         True      False 11-12-2021 3:17:10 PM      0.6
 .EXAMPLE  
-    Audit-UserShare -daysSinceLogin 30 -deleteNoAccount
+    Audit-UserShare -daysSinceLogin 30 -Remove Old
         SamAccountName Enabled No Account LastLogonDate          Size/GB
         -------------- ------- ---------- -------------          -------
         testUser1         True      False 11-11-2021 3:19:49 PM     0.12
@@ -80,14 +80,11 @@ param (
     [ValidateScript({Test-Path $_})]
     [String]$saveFolder=$null,
 
-    [ValidateSet(“Move”,”Remove”)]
-    [String] $DeleteNoAccounts,
+    [ValidateSet(“NoAccount”,”DisabledUser”,"Old")]
+    [String] $Move,
 
-    [ValidateSet(“Move”,”Remove”)]
-    [String] $DeleteDisabledUser,
-
-    [ValidateSet(“Move”,”Remove”)]
-    [String] $DeleteOldAccounts,
+    [ValidateSet(“NoAccount”,”DisabledUser”,"Old")]
+    [String] $Remove,
 
     [ValidateScript({Test-Path $_})]
     [String] $MovePath='',
@@ -98,6 +95,7 @@ param (
 
     [ValidateScript({Test-Path $_})]
     [String]$logPath=''
+
 )
 
 Import-Module ActiveDirectory
@@ -105,38 +103,36 @@ Import-Module ActiveDirectory
 #Removes or Moves user folder 
 #Param $user: The custom object made in the main function
 #Param $action: Derived from $DeleteNoUser or $deleteOldUser this specfies to remove or move
-function Remove-Folder($oldUser){
-
+function Remove-Folder{
+    [cmdletbinding()]
+    Param($oldUser)
     #Invoke-Command -ComputerName "ServerName" -scriptblock {Get-SmbOpenFile|Where-Object Path -like "PathToUserFolder"|Close-SmbOpenFile -Force}
     #move-Item "ServerPath" -Recurse -Force $searchDir\$i
     #Write-Warning -Message "You are able to (re)move folders, are you sure?" -WarningAction Inquire
-    foreach($user in $oldUser){
 
-        if($DeleteNoAccounts){
-            if(!($user."No Account")){Continue}
-            else{$action=$DeleteNoAccounts} 
-        }elseif($DeleteOldAccounts){
-            if(($user."No Account")){Continue}
-            else{$action=$DeleteOldAccounts} 
-        }elseif($DeleteDisabledUser){
-            if(($user.Enabled)){Continue}
-            else{$action=$DeleteDisabledUser} 
-        }
+    if($Move){$action="move"; $Group=$Move}
+    elseif($Remove){$action="remove";$Group=$Remove}
+
+    foreach($user in $oldUser){
+        if($Group -like "NoAccount" -and $user."No Account" -eq $false){continue}
+        elseif($Group -like "DisabledUser" -and $user.Enabled -eq $true){continue}
+        elseif($Group -like "Old" -and $user.LastLogonDate -like $null){continue}
 
         if($logPath){logToPath $logPath "$action : $($user.SamAccountName)"}
 
-        if($action.ToLower() -eq "move"){
+        if($action -eq "move"){
 
             #Verify MovePath is specfied when moving folders and follow through if correct
             if($MovePath -eq ''){
                 Write-Error -Message "Specify -MovePath" -Category InvalidArgument
                 Exit 1
             }
-            Move-Item -Force $("$searchDir\$($user.SamAccountName)") $MovePath -Confirm
+            
+            Move-Item -Force $("$searchDir\$($user.SamAccountName)") $MovePath 
             #Write-Host("Moving $user.SamAccountName")
 
-        }elseif($action.ToLower() -eq "remove"){
-            #Remove-Item -Recurse -Force $searchDir\$user.SamAccountName -Confirm
+        }elseif($action -eq "remove"){
+            Remove-Item -Recurse -Force $searchDir\$user.SamAccountName
         }
     }
 }
@@ -215,7 +211,7 @@ $oldUser=Get-OldUsers
  
 if($folderSize){$oldUser=Get-FolderSize $oldUser}
 
-if($DeleteNoAccounts -or $DeleteOldAccounts -or $DeleteDisabledUser){Remove-Folder $oldUser}
+if($Move -or $Remove){Remove-Folder $oldUser}
 
 if($saveFolder){
     if($logPath){logToPath $logPath "Saving Output"}
@@ -224,7 +220,7 @@ if($saveFolder){
     $oldUser | export-csv -NoTypeInformation "$saveFolder\UserShareAudit - $date.csv"
 
 }else{
-    $oldUser | Format-Table | Out-String | Write-Host        
+    $oldUser      
 }
 
 
