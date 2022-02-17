@@ -185,7 +185,7 @@ function Get-OldUsers(){
         if($i.PSIsContainer -and $i.Name -notin $Exclude ){
 
             try{
-                $user=$(Get-ADUser -Identity $i.Name -Properties "LastLogonDate" | Where-Object {($_.LastLogonDate -lt (Get-Date).AddDays(-$daysSinceLogin)) -and ($_.LastLogonDate -ne $NULL)})
+                $user=$(Get-ADUser -Identity $i.Name -Properties "LastLogonDate" | Where-Object {($_.LastLogonDate -lt (Get-Date).AddDays(-$daysSinceLogin)) -and ($NULL -ne $_.LastLogonDate)})
                 $user = $($user |select-object SamAccountName,Enabled,@{n="No Account";e={$false}},LastLogonDate)
 
             }catch [Microsoft.ActiveDirectory.Management.ADIdentityNotFoundException]{
