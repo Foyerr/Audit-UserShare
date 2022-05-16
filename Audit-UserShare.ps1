@@ -109,16 +109,18 @@ function Remove-Folder{
     #Invoke-Command -ComputerName "ServerName" -scriptblock {Get-SmbOpenFile|Where-Object Path -like "PathToUserFolder"|Close-SmbOpenFile -Force}
     #move-Item "ServerPath" -Recurse -Force $searchDir\$i
     #Write-Warning -Message "You are able to (re)move folders, are you sure?" -WarningAction Inquire
-
+    $loopCount=0
     if($Move){$action="move"; $Group=$Move}
     elseif($Remove){$action="remove";$Group=$Remove}
 
     foreach($user in $oldUser){
+        Write-Progress -Activity "$($user.SamAccountName)" -PercentComplete $(($loopCount/($oldUser.count))*100)
         if($Group -like "NoAccount" -and $user."No Account" -eq $false){continue}
         elseif($Group -like "DisabledUser" -and $user.Enabled -eq $true){continue}
         elseif($Group -like "Old" -and $user.LastLogonDate -like $null){continue}
 
         if($logPath){logToPath $logPath "$action : $($user.SamAccountName)"}
+        #Invoke-Command -ComputerName $searchDir
 
         if($action -eq "move"){
 
@@ -132,13 +134,17 @@ function Remove-Folder{
             #Write-Host("Moving $user.SamAccountName")
 
         }elseif($action -eq "remove"){
-            Remove-Item -Recurse -Force $searchDir\$user.SamAccountName
+
+            #Get-ChildItem  $searchDir\$($user.SamAccountName) -Include * -Recurse | ForEach  { $_.Delete()} #| Remove-Item -Force -Recurse -ErrorAction SilentlyContinue
+            Get-ChildItem * -Include * -Recurse | Remove-Item -Force -ErrorAction SilentlyContinue
         }
+        $loopCount+=1
     }
+
 }
 
 #Calculate the folder size of each users home folder
-#Param: $user: The custom object made in the main function
+#Param: $oldUser: The custom object made in the main function
 function Get-FolderSize($oldUser){
     $totalSize=0
     $loopCount=0
@@ -164,16 +170,15 @@ function Get-FolderSize($oldUser){
     return $rtnValue
 }
 
-function Get-OldUsers(){
+function Get-OldUsers($searchDir){
 
     $loopCount=0
     $oldUser = @()
     
     $userShareList=$(get-childitem $searchDir)
     $totalCount=$userShareList.count
-    #Loop through the list of users in the share and test for AD accounts if older than x days
-    #If -folderSize calculate the size of each users folder
 
+    #Loop through the list of users in the share and test for AD accounts if older than x days
     foreach($i in $userShareList){
         Write-Progress -Activity "Searching : $searchDir$i" -PercentComplete $(($loopCount/$totalCount)*100)
         
@@ -189,7 +194,7 @@ function Get-OldUsers(){
             }
 
             if($logPath -and $user){logToPath $logPath "User Found : $($user.SamAccountName)"}
-
+            
             $olduser+=$user
             $loopCount++
         }
@@ -203,16 +208,25 @@ function logToPath($logPath,$message){
         Write-Output "$date : $message" | Out-File $logPath\"UserShareAudit.log" -Append
 }
 
+
+
+
+## Main ##
+
 if(!$searchDir){
     $searchDir=($(get-aduser $env:username -Properties HomeDirectory).HomeDirectory -replace "$env:username")
 }
 
-$oldUser=Get-OldUsers
+$oldUser=Get-OldUsers $searchDir
  
+# If -FolderSize is specfied, pass oldUser var and calculate the folder size
 if($folderSize){$oldUser=Get-FolderSize $oldUser}
 
+# If move or remove, pass oldUser to Remove-Folder Function
 if($Move -or $Remove){Remove-Folder $oldUser}
 
+# If saveFolder if specfied, save the output to a CSV file
+# else output to console
 if($saveFolder){
     if($logPath){logToPath $logPath "Saving Output"}
 
@@ -220,7 +234,7 @@ if($saveFolder){
     $oldUser | export-csv -NoTypeInformation "$saveFolder\UserShareAudit - $date.csv"
 
 }else{
-    $oldUser      
+    $oldUser | ft      
 }
 
 
