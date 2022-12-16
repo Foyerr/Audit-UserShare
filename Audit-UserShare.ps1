@@ -136,7 +136,7 @@ function Remove-Folder{
         }elseif($action -eq "remove"){
 
             #Get-ChildItem  $searchDir\$($user.SamAccountName) -Include * -Recurse | ForEach  { $_.Delete()} #| Remove-Item -Force -Recurse -ErrorAction SilentlyContinue
-            Get-ChildItem * -Include * -Recurse | Remove-Item -Force -ErrorAction SilentlyContinue
+            Get-ChildItem $("$searchDir\$($user.SamAccountName)") -Include * -Recurse | Remove-Item -Force -ErrorAction SilentlyContinue
         }
         $loopCount+=1
     }
