@@ -149,24 +149,26 @@ function Get-FolderSize($oldUser){
     $totalSize=0
     $loopCount=0
     $totalCount=$oldUser.count
-    $rtnValue = 
-    
-    foreach($user in $oldUser){
-        Write-Progress -Activity "Calculating size of : $($user.SamAccountName)" -PercentComplete $(($loopCount/$totalCount)*100)
-        if($logPath){logToPath $logPath "Calculating size : $($user.SamAccountName)"}
+    $rtnValue = [System.Collections.Generic.List[object]]::new()
 
-        $log=''
-        $log=robocopy "$searchDir\$($user.SamAccountName)" NULL /L /S /NJH /BYTES /NC /NDL /XJ /R:0 /W:0 /MT:32 /NFL
-        $Line = $log | Where-Object{$_ -match "^\s+Bytes.+"}
-        $Line = $Line -split "\s+"
     
-        $rtnValue+=$($user | select-object -property *,@{n="Size/GB";e={$([math]::Round($Line[3]/1GB,2))}})
-        $totalSize+=$([math]::Round($Line[3]/1GB,2))
-        $loopCount++
+    foreach($i in $oldUser){
+        foreach($user in $i){
+            Write-Progress -Activity "Calculating size of : $($user.SamAccountName)" -PercentComplete $(($loopCount/$totalCount)*100)
+            #$user
+            if($logPath){logToPath $logPath "Calculating size : $($user.SamAccountName)"}
+
+            $log=''
+            $log=robocopy $user.dir NULL /L /S /NJH /BYTES /NC /NDL /XJ /R:0 /W:0 /MT:32 /NFL
+            $Line = $log | Where-Object{$_ -match "^\s+Bytes.+"}
+            $Line = $Line -split "\s+"
+
+    
+            $rtnValue.add($($user | select-object -property *,@{n="Size/GB";e={$([math]::Round($Line[3]/1GB,2))}}))
+            $loopCount++
+        }
     }
-
-    $rtnValue+=""
-    $rtnValue+=$(""|select-object -property @{n="SamAccountName";e={"Total Size"}},@{n="Size/GB";e={$totalSize}})
+    
     return $rtnValue
 }
 
@@ -218,17 +220,17 @@ function logToPath($logPath,$message){
 
 
 ## Main ##
-$oldUser = [System.Collections.Generic.List[object]]::new()
+#$oldUser = [System.Collections.Generic.List[object]]::new()
 
 if(!$searchDir){
     $searchDir=($(get-aduser $env:username -Properties HomeDirectory).HomeDirectory -replace "$env:username")
 }
 
 $queryDate = (Get-Date).AddDays(-$daysSinceLogin)
-$olduser.add((Get-OldUsers $searchDir $queryDate))
+$olduser = (Get-OldUsers $searchDir $queryDate)
  
 # If -FolderSize is specfied, pass oldUser var and calculate the folder size
-if($folderSize){$oldUser=Get-FolderSize $oldUser}
+if($folderSize){$olduser = Get-FolderSize $oldUser}
 
 # If move or remove, pass oldUser to Remove-Folder Function
 if($Move -or $Remove){Remove-Folder $oldUser}
