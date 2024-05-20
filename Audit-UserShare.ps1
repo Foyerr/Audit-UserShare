@@ -113,32 +113,34 @@ function Remove-Folder{
     if($Move){$action="move"; $Group=$Move}
     elseif($Remove){$action="remove";$Group=$Remove}
 
-    foreach($user in $oldUser){
-        Write-Progress -Activity "$($user.SamAccountName)" -PercentComplete $(($loopCount/($oldUser.count))*100)
-        if($Group -like "NoAccount" -and $user."No Account" -eq $false){continue}
-        elseif($Group -like "DisabledUser" -and $user.Enabled -eq $true){continue}
-        elseif($Group -like "Old" -and $user.LastLogonDate -like $null){continue}
+    foreach($i in $oldUser){
+       foreach($user in $i){
+            Write-Progress -Activity "$($user.SamAccountName)" -PercentComplete $(($loopCount/($oldUser.count))*100)
+            if($Group -like "NoAccount" -and $user."No Account" -eq $false){continue}
+            elseif($Group -like "DisabledUser" -and $user.Enabled -eq $true){continue}
+            elseif($Group -like "Old" -and $user.LastLogonDate -like $null){continue}
 
-        if($logPath){logToPath $logPath "$action : $($user.SamAccountName)"}
-        #Invoke-Command -ComputerName $searchDir
+            if($logPath){logToPath $logPath "$action : $($user.SamAccountName)"}
+            #Invoke-Command -ComputerName $searchDir
 
-        if($action -eq "move"){
+            if($action -eq "move"){
 
-            #Verify MovePath is specfied when moving folders and follow through if correct
-            if($MovePath -eq ''){
-                Write-Error -Message "Specify -MovePath" -Category InvalidArgument
-                Exit 1
-            }
+                #Verify MovePath is specfied when moving folders and follow through if correct
+                if($MovePath -eq ''){
+                    Write-Error -Message "Specify -MovePath" -Category InvalidArgument
+                    Exit 1
+                }
             
-            Move-Item -Force $("$searchDir\$($user.SamAccountName)") $MovePath 
-            #Write-Host("Moving $user.SamAccountName")
+                Move-Item -Force $user.dir $MovePath 
+                #Write-Host("Moving $user.SamAccountName")
 
-        }elseif($action -eq "remove"){
+            }elseif($action -eq "remove"){
 
-            #Get-ChildItem  $searchDir\$($user.SamAccountName) -Include * -Recurse | ForEach  { $_.Delete()} #| Remove-Item -Force -Recurse -ErrorAction SilentlyContinue
-            Get-ChildItem $("$searchDir\$($user.SamAccountName)") -Include * -Recurse | Remove-Item -Force -ErrorAction SilentlyContinue
+                #Get-ChildItem  $searchDir\$($user.SamAccountName) -Include * -Recurse | ForEach  { $_.Delete()} #| Remove-Item -Force -Recurse -ErrorAction SilentlyContinue
+                Get-ChildItem $user.dir -Include * -Recurse | Remove-Item -Force -ErrorAction SilentlyContinue
+            }
+            $loopCount+=1
         }
-        $loopCount+=1
     }
 
 }
