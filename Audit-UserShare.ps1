@@ -149,7 +149,7 @@ function Get-FolderSize($oldUser){
     $totalSize=0
     $loopCount=0
     $totalCount=$oldUser.count
-    $rtnValue = @()
+    $rtnValue = 
     
     foreach($user in $oldUser){
         Write-Progress -Activity "Calculating size of : $($user.SamAccountName)" -PercentComplete $(($loopCount/$totalCount)*100)
@@ -172,35 +172,36 @@ function Get-FolderSize($oldUser){
 
 function Get-OldUsers($searchDir){
 
-    $loopCount=0
-    $oldUser = @()
-    
+    $oldUser = [System.Collections.Generic.List[object]]::new()
+
+    $loopCount=0    
     $userShareList=$(get-childitem $searchDir)
     $totalCount=$userShareList.count
 
     #Loop through the list of users in the share and test for AD accounts if older than x days
-    foreach($i in $userShareList){
-        Write-Progress -Activity "Searching : $searchDir$i" -PercentComplete $(($loopCount/$totalCount)*100)
+    foreach($dir in $userShareList){
+        Write-Progress -Activity "Searching : $searchDir$dir" -PercentComplete $(($loopCount/$totalCount)*100)
         
         #Test for if folder and not excluded
-        if($i.PSIsContainer -and $i.Name -notin $Exclude ){
+        if($dir.PSIsContainer -and ($dir.Name -notin $Exclude)){
 
             try{
-                $user=$(Get-ADUser -Identity $i.Name -Properties "LastLogonDate" | Where-Object {($_.LastLogonDate -lt (Get-Date).AddDays(-$daysSinceLogin)) -and ($NULL -ne $_.LastLogonDate)})
+                $user=$(Get-ADUser -Identity $dir.Name -Properties "LastLogonDate" | Where-Object {($_.LastLogonDate -lt (Get-Date).AddDays(-$daysSinceLogin)) -and ($NULL -ne $_.LastLogonDate)})
                 $user = $($user |select-object SamAccountName,Enabled,@{n="No Account";e={$false}},LastLogonDate)
 
             }catch [Microsoft.ActiveDirectory.Management.ADIdentityNotFoundException]{
-                $user = $(""|select-object @{n="SamAccountName";e={$i.Name}},@{n="Enabled";e={"N/A"}},@{n="No Account";e={$true}})
+                $user = $(""|select-object @{n="SamAccountName";e={$dir.Name}},@{n="Enabled";e={"N/A"}},@{n="No Account";e={$true}})
             }
 
             if($logPath -and $user){logToPath $logPath "User Found : $($user.SamAccountName)"}
-            
-            $olduser+=$user
+            if($user){
+                
+                $olduser.add($user)
+             }
             $loopCount++
         }
     }
-    return($oldUser)
-
+    return($olduser)
 }
 
 function logToPath($logPath,$message){
@@ -212,12 +213,13 @@ function logToPath($logPath,$message){
 
 
 ## Main ##
+$oldUser = [System.Collections.Generic.List[object]]::new()
 
 if(!$searchDir){
     $searchDir=($(get-aduser $env:username -Properties HomeDirectory).HomeDirectory -replace "$env:username")
 }
 
-$oldUser=Get-OldUsers $searchDir
+$olduser.add((Get-OldUsers $searchDir))
  
 # If -FolderSize is specfied, pass oldUser var and calculate the folder size
 if($folderSize){$oldUser=Get-FolderSize $oldUser}
