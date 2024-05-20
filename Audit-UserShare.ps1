@@ -170,13 +170,18 @@ function Get-FolderSize($oldUser){
     return $rtnValue
 }
 
-function Get-OldUsers($searchDir){
+
+# Takes in path to usershare and a date to compare to the last time the user logedin 
+# Returns List of users that they not logged in since this date as well as users unable to be queried
+function Get-OldUsers($searchDir,$queryDate){
 
     $oldUser = [System.Collections.Generic.List[object]]::new()
 
-    $loopCount=0    
     $userShareList=$(get-childitem $searchDir)
     $totalCount=$userShareList.count
+
+    $loopCount=0    
+    
 
     #Loop through the list of users in the share and test for AD accounts if older than x days
     foreach($dir in $userShareList){
@@ -186,11 +191,11 @@ function Get-OldUsers($searchDir){
         if($dir.PSIsContainer -and ($dir.Name -notin $Exclude)){
 
             try{
-                $user=$(Get-ADUser -Identity $dir.Name -Properties "LastLogonDate" | Where-Object {($_.LastLogonDate -lt (Get-Date).AddDays(-$daysSinceLogin)) -and ($NULL -ne $_.LastLogonDate)})
-                $user = $($user |select-object SamAccountName,Enabled,@{n="No Account";e={$false}},LastLogonDate)
+                $user=$(Get-ADUser -Identity $dir.Name -Properties "LastLogonDate" | Where-Object {($_.LastLogonDate -lt $queryDate) -and ($NULL -ne $_.LastLogonDate)})
+                $user = $($user |select-object SamAccountName,Enabled,LastLogonDate,@{n="Dir";e={$dir.fullname}})
 
             }catch [Microsoft.ActiveDirectory.Management.ADIdentityNotFoundException]{
-                $user = $(""|select-object @{n="SamAccountName";e={$dir.Name}},@{n="Enabled";e={"N/A"}},@{n="No Account";e={$true}})
+                $user = $(""|select-object @{n="SamAccountName";e={$dir.Name}},@{n="Enabled";e={"N/A"}},@{n="LastLogonDate";e={""}},@{n="Dir";e={$dir.fullname}})
             }
 
             if($logPath -and $user){logToPath $logPath "User Found : $($user.SamAccountName)"}
@@ -219,7 +224,8 @@ if(!$searchDir){
     $searchDir=($(get-aduser $env:username -Properties HomeDirectory).HomeDirectory -replace "$env:username")
 }
 
-$olduser.add((Get-OldUsers $searchDir))
+$queryDate = (Get-Date).AddDays(-$daysSinceLogin)
+$olduser.add((Get-OldUsers $searchDir $queryDate))
  
 # If -FolderSize is specfied, pass oldUser var and calculate the folder size
 if($folderSize){$oldUser=Get-FolderSize $oldUser}
