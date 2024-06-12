@@ -1,4 +1,5 @@
-﻿<#
+﻿
+<#
 .SYNOPSIS
     Audit your user share to identify potentially unneeded folders.
 
@@ -177,40 +178,25 @@ function Get-FolderSize($oldUser){
 
 # Takes in path to usershare and a date to compare to the last time the user logedin 
 # Returns List of users that they not logged in since this date as well as users unable to be queried
-function Get-OldUsers($searchDir,$queryDate){
+function Get-OldUsers($searchDir){
 
-    $oldUser = [System.Collections.Generic.List[object]]::new()
-
-    $userShareList=$(get-childitem $searchDir)
-    $totalCount=$userShareList.count
-
-    $loopCount=0    
     
 
-    #Loop through the list of users in the share and test for AD accounts if older than x days
-    foreach($dir in $userShareList){
-        Write-Progress -Activity "Searching : $searchDir$dir" -PercentComplete $(($loopCount/$totalCount)*100)
+    try{
+        $x = $([System.IO.Directory]::GetDirectories("$($searchDir)"))
+    }catch{return}
+    foreach($userPath in $x){
         
-        #Test for if folder and not excluded
-        if($dir.PSIsContainer -and ($dir.Name -notin $Exclude)){
+        $foldername = $userPath.split("\")[-1]
+        if($folderName -like "z*"){$folderName = ("$folderName").Substring(1)}
 
-            try{
-                $user=$(Get-ADUser -Identity $dir.Name -Properties "LastLogonDate" | Where-Object {($_.LastLogonDate -lt $queryDate) -and ($NULL -ne $_.LastLogonDate)})
-                $user = $($user |select-object SamAccountName,Enabled,LastLogonDate,@{n="Dir";e={$dir.fullname}})
-
-            }catch [Microsoft.ActiveDirectory.Management.ADIdentityNotFoundException]{
-                $user = $(""|select-object @{n="SamAccountName";e={$dir.Name}},@{n="Enabled";e={"N/A"}},@{n="LastLogonDate";e={""}},@{n="Dir";e={$dir.fullname}})
+         $oldUser[$foldername] = @{
+            UserID = $foldername
+            Dir = $userPath
+            LastLogonDate= ""#$AdUserCache[$foldername].LastLogonDate
+            Enabled = ""#$AdUserCache[$foldername].Enabled 
             }
-
-            if($logPath -and $user){logToPath $logPath "User Found : $($user.SamAccountName)"}
-            if($user){
-                
-                $olduser.add($user)
-             }
-            $loopCount++
-        }
     }
-    return($olduser)
 }
 
 function logToPath($logPath,$message){
@@ -222,15 +208,44 @@ function logToPath($logPath,$message){
 
 
 ## Main ##
-#$oldUser = [System.Collections.Generic.List[object]]::new()
 
 if(!$searchDir){
     $searchDir=($(get-aduser $env:username -Properties HomeDirectory).HomeDirectory -replace "$env:username")
 }
 
+
+
+$searcher = New-Object DirectoryServices.DirectorySearcher
+$searcher.Filter = "(&(sAMAccountType=805306368))"
+$searcher.PropertiesToLoad.AddRange(@("samaccountname", "userAccountControl"))
+$searcher.PageSize = 1000  # Ensures paging is used for large AD environments
+$AdUserCache = $searcher.FindAll() 
+
+
+$oldUser = [hashtable]::Synchronized(@{})
+#$oldUser = [System.Collections.Generic.List[object]]::new()
+$searchDir = "\\nbpower.com\dfs\users28"
 $queryDate = (Get-Date).AddDays(-$daysSinceLogin)
-$olduser = (Get-OldUsers $searchDir $queryDate)
- 
+
+$usersDIRS = $(Get-ChildItem -Directory -path \\nbpower.com\DFS -Filter "*user*" )
+foreach($a in $usersDIRS){
+    Get-OldUsers "\\nbpower.com\dfs\$a" 
+
+}
+
+
+$AdUserCache | foreach{
+    $user = $_.Properties
+    $UserID = $user["samaccountname"][0]
+    $userAccountControl = $user["useraccountcontrol"][0]
+    if ($oldUser[$UserID]){
+        #$oldUser[$UserID]. LastLogonDate = 
+        $oldUser[$UserID]. Enabled = (-not ($userAccountControl -band 2))
+
+    } 
+}
+
+
 # If -FolderSize is specfied, pass oldUser var and calculate the folder size
 if($folderSize){$olduser = Get-FolderSize $oldUser}
 
@@ -249,4 +264,8 @@ if($saveFolder){
     $oldUser | ft      
 }
 
+if(test-path -Path  "$saveFolder\UserShareAudit - $date.csv"){
+    Write-host("Write to $saveFoldr : Success")
+
+}else{Write-host("Write to $saveFolder : Failed")}
 
